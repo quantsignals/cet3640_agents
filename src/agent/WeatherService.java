@@ -1,44 +1,119 @@
 package agent;
 
+import com.google.gson.Gson;
+
 public class WeatherService extends BaseService {
-	private static final String BASE_URL = "https://wttr.in/";
-	private RestService restService;
-	
-    public WeatherService(boolean verbose, RestService restService) {
-		super(verbose);
-		this.restService = restService;
-	}
 
-	
+    private static final String BASE_URL =
+            "https://weather.m-a-rhode.workers.dev?city=";
 
-	public void setVerbose(boolean verbose){
-		super.setVerbose(verbose);
-		restService.setVerbose(verbose);
-	}
-	
+    private final HttpClient httpClient;
+    private final Gson gson;
+
+    public WeatherService(boolean verbose, HttpClient httpClient) {
+        super(verbose);
+        this.httpClient = httpClient;
+        this.gson = new Gson();
+    }
+
     @Override
     public String getType() {
         return "weather";
     }
 
     @Override
+    public String getDescription() {
+        return "Gets weather for a city, for example: weather New York";
+    }
+
+    @Override
+    public String getInputDescription() {
+        return "A city name";
+    }
+    
+    public String getExample() {
+    	return "weather New York";
+    }
+
+    @Override
     public String handleRequest(String city) {
-    	if(verbose) System.out.println("WeatherService request: "+city);
-        if (city.isEmpty()) return "Error: Please provide a city name.";
+        if (verbose) {
+            System.out.println("WeatherService request: " + city);
+        }
 
-        String response = restService.handleRequest(BASE_URL + encode(city) + "?format=%25C+%25t");
-        if(verbose) System.out.println("WeatherService response: "+ response);
-        if (response.startsWith("Error")) return response;
+        if (city == null || city.trim().isEmpty()) {
+            return "Error: Please provide a city name.";
+        }
 
-        // Extract weather condition and temperature from response
-        int lastSpaceIndex = response.lastIndexOf(" ");
-        if (lastSpaceIndex == -1) return "Error: Unexpected response from weather API.";
+        String encoded = httpClient.encode(city.trim());
+        String response = httpClient.get(BASE_URL + encoded, verbose);
 
-        String condition = response.substring(0, lastSpaceIndex); // Extract condition text
-        String temperature = response.substring(lastSpaceIndex + 1).replace("+", "").replace("°F", "").trim(); // Extract numeric temperature
+        if (verbose) {
+            System.out.println("WeatherService raw response: " + response);
+        }
 
-        if(verbose) System.out.println("WeatherService condition: "+condition);
-        if(verbose) System.out.println("WeatherService temperature: "+temperature);
-        return temperature;
+        if (response.startsWith("Error:")) {
+            return response;
+        }
+
+        try {
+            WeatherApiResponse weatherResponse =
+                    gson.fromJson(response, WeatherApiResponse.class);
+
+            if (weatherResponse == null
+                    || weatherResponse.resolved_location == null
+                    || weatherResponse.weather == null
+                    || weatherResponse.weather.current_weather == null
+                    || weatherResponse.weather.current_weather_units == null) {
+                return "Error: Unable to parse weather response.";
+            }
+
+            String cityName = weatherResponse.resolved_location.name;
+            double temperature = weatherResponse.weather.current_weather.temperature;
+            String temperatureUnit =
+                    weatherResponse.weather.current_weather_units.temperature;
+            double windspeed = weatherResponse.weather.current_weather.windspeed;
+            String windspeedUnit =
+                    weatherResponse.weather.current_weather_units.windspeed;
+
+            String result = cityName
+                    + ": "
+                    + temperature + " " + temperatureUnit
+                    + ", wind " + windspeed + " " + windspeedUnit;
+
+            if (verbose) {
+                System.out.println("WeatherService parsed result: " + result);
+            }
+
+            return result;
+
+        } catch (Exception e) {
+            return "Error: Unable to parse weather response.";
+        }
+    }
+
+    private static class WeatherApiResponse {
+        ResolvedLocation resolved_location;
+        WeatherData weather;
+    }
+
+    private static class ResolvedLocation {
+        String name;
+    }
+
+    private static class WeatherData {
+        CurrentWeatherUnits current_weather_units;
+        CurrentWeather current_weather;
+    }
+
+    private static class CurrentWeatherUnits {
+        String temperature;
+        String windspeed;
+    }
+
+    private static class CurrentWeather {
+        double temperature;
+        double windspeed;
+        int weathercode;
     }
 }
