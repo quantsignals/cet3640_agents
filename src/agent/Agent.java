@@ -1,91 +1,135 @@
 package agent;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Scanner;
 
 public class Agent {
-	boolean verbose;
-    private WeatherService weatherService; 
-    private CalcService calcService;
-    private RestService restService;
+    private boolean verbose;
+    private final List<BaseService> services;
 
-    
     public Agent(boolean verbose) {
-    	this.verbose=verbose;
-    	
-    	restService = new RestService(verbose);
-    	weatherService = new WeatherService(verbose, restService);
-    	calcService = new CalcService(verbose, restService);
+        this.verbose = verbose;
+        this.services = new ArrayList<>();
+
+        HttpClient httpClient = new HttpClient();
+        
+        
+        services.add(new GenericService(
+        	    verbose,
+        	    httpClient,
+        	    "temperature",
+        	    "Gets the current temperature for a city",
+        	    "a city name",
+        	    "temperature New York",
+        	    "https://weather.m-a-rhode.workers.dev?city={input}",
+        	    "weather.current_weather.temperature",
+        	    "Temperature: ",
+        	    false
+        	));
+
+        services.add(new CalcService(verbose, httpClient));
+        services.add(new WeatherService(verbose, httpClient));
+
     }
-    
+
     public void setVerbose(boolean verbose) {
-    	this.verbose = verbose;
-    	weatherService.setVerbose(verbose);
-    	calcService.setVerbose(verbose);
-    	restService.setVerbose(verbose);
-    }
-    
-    public String handleRequest(String service, String request) {
-        if (service == null || request == null) {
-            return "Error: Input must contain 'service' and 'request'.";
+        this.verbose = verbose;
+        for (BaseService service : services) {
+            service.setVerbose(verbose);
         }
-
-        // REQUEST VERBOSE 
-        if(service.equalsIgnoreCase("verbose")) {
-        	if(request.equalsIgnoreCase("on") || request.equalsIgnoreCase("true")) {
-        		setVerbose(true);
-        		return "Verbose mode enabled"; 
-        	}
-        	if(request.equalsIgnoreCase("off") || request.equalsIgnoreCase("false")){
-        		setVerbose(false);
-        		return "Verbose mode disabled"; 
-        	}
-        	return "Set verbose failed: choose on or off";
-        }
-        
-        // REQUEST WEATHER
-        if (service.equalsIgnoreCase(weatherService.getType())) {
-            return weatherService.handleRequest(request);
-        } 
-        
-        // REQUEST CALCULATION
-        if (service.equalsIgnoreCase(calcService.getType())) {
-            return calcService.handleRequest(request);
-        }
-
-        // REQUEST REST
-        if (service.equalsIgnoreCase(restService.getType())) {
-            return restService.handleRequest(request);
-        }
-
-        
-        return "Unknown service: " + service + ". Available services: verbose, weather, calc, rest.";
     }
 
+    public String listServices() {
+        String str = "Available services:\n";
+
+        for (BaseService service : services) {
+        	str = str + "- " + service.getType() +"\n";
+        	str = str + "  Description: " + service.getDescription() + "\n";
+        	str = str + "  Input: " + service.getInputDescription() + "\n\n";
+        }
+
+        return str;
+    }
+
+    public BaseService findServiceByType(String type) {
+        for (BaseService service : services) {
+            if (service.getType().equalsIgnoreCase(type)) {
+                return service;
+            }
+        }
+        return null;
+    }
+
+    public String handleRequest(String serviceType, String request) {
+        if (serviceType == null || request == null) {
+            return "Error: Input must include both a service and a request.";
+        }
+
+        if (serviceType.equalsIgnoreCase("verbose")) {
+            if (request.equalsIgnoreCase("on") || request.equalsIgnoreCase("true")) {
+                setVerbose(true);
+                return "Verbose mode enabled.";
+            }
+            if (request.equalsIgnoreCase("off") || request.equalsIgnoreCase("false")) {
+                setVerbose(false);
+                return "Verbose mode disabled.";
+            }
+            return "Error: Use 'verbose on' or 'verbose off'.";
+        }
+
+        if (serviceType.equalsIgnoreCase("services") || serviceType.equalsIgnoreCase("help")) {
+            return listServices();
+        }
+
+        BaseService service = findServiceByType(serviceType);
+        if (service == null) {
+            return "Unknown service: " + serviceType + ". Type 'services' to list available services.";
+        }
+
+        if (verbose) {
+            System.out.println("Agent dispatching to service: " + service.getType());
+        }
+
+        return service.handleRequest(request);
+    }
 
     public void startConsole() {
         Scanner scanner = new Scanner(System.in);
-        System.out.println("Welcome! Type service and request.");
-        System.out.println("Examples: ");
-        System.out.println("calc 1+1");
-        System.out.println("weather New York");
-        System.out.println("rest https://api.mymemory.translated.net/?q=highway&langpair=en%7Cde");
-        System.out.println("verbose on");        
-        System.out.println("exit");
+
+        System.out.println("Welcome to the Agent Service Console.");
+        System.out.println("Type 'services' to list services.");
+        System.out.println("Examples:");
+        for(BaseService service : services) {
+        	System.out.println("  "+service.getExample());
+        }
+        System.out.println("  verbose on");
+        System.out.println("  exit");
         
         while (true) {
             System.out.print("\nEnter command: ");
             String input = scanner.nextLine().trim();
-            if (input.equalsIgnoreCase("exit")) break;
 
-            int separator_index = input.indexOf(' ');
-            if (separator_index == -1) {
-                System.out.println("Error: Input must be in format 'service request'");
+            if (input.equalsIgnoreCase("exit")) {
+                break;
+            }
+
+            if (input.equalsIgnoreCase("services") || input.equalsIgnoreCase("help")) {
+                System.out.println(listServices());
                 continue;
             }
 
-            String service = input.substring(0,separator_index);
-            String message = input.substring(separator_index+1);
-            System.out.println("Result: "+handleRequest(service, message));
+            int spaceIndex = input.indexOf(' ');
+            if (spaceIndex == -1) {
+                System.out.println("Error: Input must be in the form 'service request'.");
+                continue;
+            }
+
+            String serviceType = input.substring(0, spaceIndex).trim();
+            String request = input.substring(spaceIndex + 1).trim();
+
+            String result = handleRequest(serviceType, request);
+            System.out.println("Result: " + result);
         }
 
         System.out.println("Goodbye!");
@@ -93,6 +137,6 @@ public class Agent {
     }
 
     public static void main(String[] args) {
-        new Agent(false).startConsole();
+    	new Agent(false).startConsole();
     }
 }
